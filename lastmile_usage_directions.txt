@@ -1,0 +1,104 @@
+Quick Start
+The Quick Start instructions below are based on macOS and Linux OS with AWS CLI installed.
+
+Step 1. Install
+# Get the source code
+git clone https://github.com/aws-samples/amazon-sagemaker-amazon-routing-challenge-sol.git
+cd amazon-sagemaker-amazon-routing-challenge-sol
+
+# Setup Python Environment
+conda create --name aro python=3.8
+conda activate aro # `aro` is the name of the python virtual environment, feel free to change it
+# if on a SageMaker notebook instance, uncomment and execute the following command instead
+# source activate aro
+
+# Install the current version of the package
+pip install -r requirements_dev.txt
+pip install -e .
+Step 2. Obtain data
+The dataset associated with the Amazon Last Mile Routing Research Challenge is publicly available at Open Data on AWS. You can run the following command to download it:
+
+aws s3 sync --no-sign-request s3://amazon-last-mile-challenges/almrrc2021/ ./data/
+The total size of the dataset is about 3.1 GB. If the command hangs for some reason, please terminate and re-run it. It will resume downloading from what's left since last try.
+
+Step 3. Preprocess data
+The datasets contain package (aka stop ) information, such as destination locations, parcel specifications, customer preferred time windows, expected service times, and zone identifiers. The preprocesing step converts this information from JSON to Parquet and Numpy array format for easy access.
+
+train_data_dir=almrrc2021-data-training
+eval_data_dir=almrrc2021-data-evaluation
+
+# generate package information in Parquet file (training)
+python preprocessing.py --act gen_route --data_dir  data/${train_data_dir}
+# generate travel time matrix for all stops in a route (training)
+python preprocessing.py --act gen_dist_mat --data_dir  data/${train_data_dir}
+# generate zone information for each stop (training)
+python preprocessing.py --act gen_zone_list --data_dir  data/${train_data_dir}
+# generate ground-truth zone sequence for each route using the Parquet file generated from `gen_route` action
+python preprocessing.py --act gen_actual_zone --data_dir  data/${train_data_dir} --pkfn ${parquet_file}
+# generate package information in Parquet (evaluation)
+python preprocessing.py --act gen_route --data_dir  data/${eval_data_dir} --mode eval
+# generate travel time matrix for all stops in a route (evaluation)
+python preprocessing.py --act gen_dist_mat --data_dir  data/${eval_data_dir} --mode eval
+# generate zone information for each stop (evaluation)
+python preprocessing.py --act gen_zone_list --data_dir  data/${eval_data_dir} --mode eval
+Step 4. Upload pre-processed data to S3
+We upload pre-processed data to Amazon S3 in order to run SageMaker processing jobs during the inference phase.
+
+export bucket_name=my-route-bucket # set `${bucket_name}` to your own S3 bucket name
+export s3_data_prefix=lmc # set `${s3_data_prefix}` to your own S3 data prefix
+aws s3 sync data/${train_data_dir}/ s3://${bucket_name}/data/${s3_data_prefix}/${train_data_dir}/
+aws s3 sync data/${eval_data_dir}/ s3://${bucket_name}/data/${s3_data_prefix}/${eval_data_dir}/
+After completing this step, the prefix structure in your S3 bucket appears as follows:
+
+${train_or_eval_data_dir}                # e.g. `Final_March_15_Data` OR `Final_June_18_Data`
+├── distance_matrix/                     # a directory with all distance matrix files
+│   ├── ${route_id_0}_raw_w_st.npy       # distance matrix file produced by preprocessing.py 
+│   ├── ...                              # more distance matrix files
+│   └── ${route_id_N}_raw_w_st.npy       # distance matrix file
+├── model_apply_inputs/                  # challenge input files
+├── model_apply_outputs/                 # output json results here
+├── model_build_inputs/                  # challenge input files
+├── model_score_inputs/                  # challenge input files
+├── model_score_outputs/                 # output json score here
+├── processed/                           # output processed parquet file here
+└── zone_list                            # A directory with all zone files
+    ├── ${route_id_0}_zone_w_st.joblib   # zone file produced by preprocessing.py            
+    ├── ...                              # more zone files
+    ├── ${route_id_N}_zone_w_st.joblib   # the last zone file
+    └── actual_zone-{mode}.csv           # ground-truth zone sequence file produced 
+                                         # by preprocessing.py
+Step 5. Train the PPM model locally
+We train the Prediction by Partial Matching (PPM) model. In our work, the PPM model is used as a sequential probability model for generating synthetic zone sequences.
+
+# train the PPM model
+python train.py --train_zdf_fn data/${train_data_dir}/zone_list/actual_zone-train.csv
+Step 6. Upload the trained model to S3
+We upload the PPM model to S3 so that the subsequent SageMake processing job can access the model to generate zone sequences.
+
+# optional - set `${s3_model_prefix}` with your own S3 model prefix
+export s3_model_prefix=almrc 
+aws s3 cp aro_ppm_train_model.joblib s3://${bucket_name}/models/${s3_model_prefix}/
+Step 7. Generate sequence locally as a test
+We run the inferernce for route generation locally (e.g. on your laptop or desktop) for the purpose of debugging or understanding the inner workings of our approach.
+
+# test inference locally
+./example_inference.sh
+Please change your script as per any debugging information revealed in the output or error statements.
+
+Step 8. Run sequence generation as a SageMaker processing job
+Now we are ready to generate routes by submititng an Amazon SageMaker processing job running on a ml.m5.4xlarge instance.
+
+# please set environment variables (e.g. ${bucket_name}) 
+# in `example_inference_job.sh` before running it
+./example_inference_job.sh
+Once submission is successful, we can navigate the browser to the Amazon SageMaker Processing jobs console to check if a job named ppm-rollout-2022-xxx is indeed running.
+
+Step 9. Check submission file
+It generally takes less than an hour to complete generating 3,052 route sequences on an ml.m5.4xlarge instance. Once the job status becomes completed, we can check the generated sequences for all routes by running the following command.
+
+aws s3 ls \
+ s3://${bucket_name}/data/${s3_data_prefix}/${eval_data_dir}/model_apply_outputs/eval-ppm-rollout
+Step 10. Obtain evaluation scores
+Once the submission file is downloaded, follow the evaluation instructions at https://github.com/MIT-CAVE/rc-cli to calculate the evaluation score, which should be around 0.0372 ~ 0.0376
+
+Step 11. Integrate this example into your last mile planning
