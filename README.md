@@ -4,8 +4,4 @@ This repo exemplifies the response to the Amazon Last Mile Routing Research Chal
 
 ![LastmiledeliveryoptimizationDemo2-ezgif com-optimize](https://github.com/MisterArbazzz/Deep-Learning-Based-Last-Mile-Deliveries-Optimization/assets/87564754/dfbedabb-9a9c-475a-8e84-1764b966b4e5)
 
-# Methodology
-
-To provide user-friendly routes for last mile planning, our method hierarchically incorporates Markov model training, online policy search (i.e. Rollout), and commercial TSP solvers. The underlying TSP solver can be chosen in any way. This repository achieves a nearly equal score of 0.0372 by using OR-tools for easier integration. These outcomes are equivalent to what the top three teams on the public leaderboard have accomplished. More significantly, our approach is entirely data- and learning-driven. The PPM model can be trained using 6,000 route sequences in 4 to 5 seconds on a single CPU instance because to the lightweight and quick training method. since it does not need any custom heuristics.
-
 Refer to lastmile_usage_directions.txt for implementation
